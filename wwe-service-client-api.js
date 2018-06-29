@@ -19,7 +19,7 @@ if(!window.genesys.wwe.service) {
 		 * To prevent security issue the argument "*" in the postMessage has to be replaced by the Workspace Web Edition host to avoid a vulnerability issue.
 		 * "*" should be replaced with "http://<my-wwe-server>".
 		 */
-		var postMessageOrigin = "https://gws-005.devcloud.genesys.com:18180/ui/ad/v1/index.html";
+		var postMessageOrigin = "https://bcbsnc-wwe-use1-pvt.genesyscloud.com/ui/ad/v1/index.html";
 
 		var self = this,
 			debug = true,

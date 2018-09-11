@@ -1,236 +1,602 @@
-<!DOCTYPE html>
-<!--
- @License Workspace Web Edition
- Copyright (c) 2015-2017 Genesys Telecommunications Laboratories
- All rights reserved.
- FILE NAME:          sample.html
--->
-<html>
+<!doctype html>
+<html lang="en">
 
 <head>
-	<title>Custom API Sample</title>
-	<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	<meta charset="utf-8">
+	<title>Genesys WWE Service Client API Sample</title>
+
+	<!-- JQuery 2.x from CDN -->
+	<link rel="stylesheet" href="https://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
+	<script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+	<script src="https://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
+
+	<!-- Bootstrap 3.x from CDN -->
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css">
+	<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
 
 	<script src="wwe-service-client-api.js"></script>
 
 	<script>
-		function executeCommand() {
-			eval(document.getElementById("command").value);
+
+		var winWWE;  // The window of the iframe hosting WWE.  Used for postMessage communication.
+	var interactionId;  // The interactionId of the currently handled interaction.
+	var intervalId;
+	
+	/**
+	 * Setup the jQuery UI stuff
+	 */
+	$(function() {
+		// var dialog;
+
+		// dialog = $( "#dialog-wwe" ).dialog({
+		//   autoOpen: false,
+		//   height: 700,
+		//   width: 1024,
+		//   modal: false});
+		  
+		// $( "#show-wwe" ).button().on( "click", function() {
+		//   dialog.dialog( "open" );
+		// });	  
+		
+		// When the user clicks the "Dial" button we will send a "voice.dial" 
+		// request to WWE along with the phone number to dial.
+		$( "#dial" ).button().on( "click", function() {
+			dial()
+		});		
+
+		// When the user clicks the "Pause Recording" button we will send a "voice.pauseRecording"
+		// request to WWE along with the interactionId of the call.
+		$( "#pauseRecording" ).button().on( "click", function() {
+			setCallRecordingState("voice.pauseRecording")
+		});	
+
+		// When the user clicks the "Resume Recording" button we will send a "voice.resumeRecording"
+		// request to WWE along with the interactionId of the call.
+		$( "#resumeRecording" ).button().on( "click", function() {
+			setCallRecordingState("voice.resumeRecording")
+		});			
+	});
+  
+	var selectedInteractionId = -1;
+	var currentInteractions = [];
+	var stateList = [];
+	var mediaList = []
+	
+	function getAgent() {
+		genesys.wwe.service.sendMessage({ 
+			request: "agent.get", 
+			parameters: [] }, 
+			function(response) { // success
+				$("#agentUsername").val(response.data.username);
+				$("#agentFirstname").val(response.data.firstname);
+				$("#agentLastname").val(response.data.lastname);
+				$("#agentEmployeeId").val(response.data.employeeId);
+				
+//			    		$("#agentdata").val(JSON.stringify(response));
+			},
+			function(response) { // failure
+				alert("Unable to get agent");
+			}
+		);
+	}
+		
+	function getStateList() {
+		genesys.wwe.service.sendMessage({ 
+			request: "agent.getStateList", 
+			parameters: [] }, 
+			function(response) { // success
+				stateList = response.data;
+				
+				var $agentStates = $("#agentState");
+				$agentStates.empty();
+				$agentStates.html(buildStateDropdown());
+// 			    		$.each(stateList, function() {
+// 			    			$agentStates.append('<li><a href="#" onclick="setAgentState(\'' + this.operationName + '\')">' + this.displayName + '</a></li>');
+// 			    		});
+				
+			},
+			function(response) { // failure
+				alert("Unable to get agent state list");
+			}
+		);
+	}
+
+	function setAgentState(stateOperationName){
+		genesys.wwe.service.sendMessage({ 
+			request: "agent.setState", 
+			parameters: [ stateOperationName ] }, 
+			function(response){  //success
+				alert("Successfully set agent state to: " + stateOperationName);
+				refreshAgentInfo();
+			},
+			function(response){  //failure
+				alert("Failed to set agent state to: " + stateOperationName);
+			});
+	}
+	
+	function getMediaList() {
+		genesys.wwe.service.sendMessage({ 
+			request: "media.getMediaList", 
+			parameters: [] }, 
+			function(response) { // success
+				mediaList = response.data;
+				
+				var $mediaTable = $("#mediaTableBody");
+				$mediaTable.empty();
+				
+				$.each(mediaList, function() {
+					$mediaTable.append('<tr><td>' + this.media + '</td><td>' + this.state.displayName + '</td><td>' + buildStateDropdown(this.media) + '</td></tr>');
+				});
+			},
+			function(response) { // failure
+				alert("Unable to get agent");
+			}
+		);
+	}						
+
+	function setMediaState(mediaName, stateOperationName){
+		genesys.wwe.service.sendMessage({ 
+			request: "media.setState", 
+			parameters: [ mediaName, stateOperationName ] }, 
+			function(response){  //success
+				alert("Successfully set " + mediaName + " state to: " + stateOperationName);
+				refreshAgentInfo();
+			},
+			function(response){  //failure
+				alert("Failed to set " + mediaName + " state to: " + stateOperationName);
+			});
+	}						
+
+	function dial() {
+		var destination = $("#phone").val();
+		var userData = {};
+
+		if ( destination == '' )
+			return;
+
+		try {
+			userData = JSON.parse($("#dialuserdata").val());
+		} catch (e) {
+		}
+		
+		genesys.wwe.service.sendMessage({ 
+			request: "voice.dial", 
+			parameters: [ destination, userData ] }, 
+			function(response){  //success
+				alert("Successfully performed dial operation to: " + destination);
+			},
+			function(response){  //failure
+				alert("Failed to perform dial operation to: " + destination);
+			});
+	}
+
+	function setCallRecordingState(operation) {
+	
+		if ( selectedInteractionId == -1 ) {
+			alert("Please select an interaction");
+			return;
+		}
+	
+		genesys.wwe.service.sendMessage({ 
+			request: operation, 
+			parameters: [ selectedInteractionId ] }, 
+			function(response){  //success
+				alert("Successfully performed call recording operation: " + operation);
+			}, 
+			function(response){  //failure
+				alert("Failed to perform call recording operation: " + operation);
+			});
+	}
+
+	function getInteractions() {
+		genesys.wwe.service.sendMessage({ 
+			request: "interaction.getInteractions", 
+			parameters: [] }, 
+			function(response) { // success
+				var $select = $("#interactions");
+				$select.empty();
+				selectedInteractionId = -1;
+				$("#interactiondata").val('');
+				$("#userdata").val('');
+				interactions = response.data;
+				$.each(interactions, function() {
+					$select.append('<option value=' + this.interactionId + '>' + this.interactionId + '</option>');
+					if (selectedInteractionId == -1) {
+						selectedInteractionId = this.interactionId;
+						getInteractionById();
+					}
+				});
+			},
+			function(response) { // failure
+				alert("Unable to get interactions");
+			}
+		);
+	}
+
+	function getInteractionById() {
+		var $select = $("#interactions");
+		var selectedInteractionId = $select.val();
+		
+		if (selectedInteractionId == -1) {
+			$("#interactiondata").val('');
+			$("#userdata").val('');
+			return;
+		}
+		
+		genesys.wwe.service.sendMessage({ 
+			request: "interaction.getByInteractionId", 
+			parameters: [ selectedInteractionId ] }, 
+			function(response){  //success
+				$("#interactiondata").val(JSON.stringify(response.data));
+			},
+			function(response){  //failure
+				alert("Unable to get interaction: id = " + selectedInteractionId);
+				selectedInteractionId = -1;
+			}
+		);
+	}
+
+	function setUserData() {
+
+		if ( selectedInteractionId == -1 ) {
+			alert("Please select an interaction");
+			return;
 		}
 
-		function log(text) {
-			var divOutput = document.getElementById("output");
-			divOutput.innerHTML = "<pre>" + text + "</pre><br/>" + divOutput.innerHTML;
+		var userData = $("#userdata").val();
+		
+		if ( userData == '' ) {
+			alert("Please enter user data");
+			return;
+		}
+		
+		try {
+			userData = JSON.parse(userData);
+		} catch(e) {
+		}
+		
+		genesys.wwe.service.sendMessage({ 
+			request: "interaction.setUserData", 
+			parameters: [ selectedInteractionId, userData ] }, 
+			function(response){  //success
+				alert("Successfully updated user data");
+			},
+			function(response){  //failure
+				alert("Failed to update user data");
+			}
+		);
+	}
+
+	function deleteUserData() {
+
+		if ( selectedInteractionId == -1 ) {
+			alert("Please select an interaction");
+			return;
 		}
 
-		function succeeded(result) {
-			log("SUCCEEDED, result: " + JSON.stringify(result, null, "\t"));
+		var key = $("#key").val();
+		
+		if ( key == '' ) {
+			alert("Please enter a key name");
+			return;
 		}
+		
+		genesys.wwe.service.sendMessage({ 
+			request: "interaction.deleteUserData", 
+			parameters: [ selectedInteractionId, key ] }, 
+			function(response){  //success
+				alert("Successfully deleted user data: key = " + key);
+			},
+			function(response){  //failure
+				alert("Failed to delete user data: key = " + key);
+			}
+		);
+	}
 
-		function failed(result) {
-			log("FAILED, result: " + JSON.stringify(result, null, "\t"));
-		}
+	$(document).ready(function() {
+		var winWWE = document.getElementById("wweFrame").contentWindow;
+		genesys.wwe.service.targetWWEWindow(winWWE);
+		
+		intervalId = setInterval(function(){ waitForSCAPI() }, 30000);
 
-		function showCommand(commandName) {
-			var command = "",
-				commandHelp = "";
-			switch (commandName) {
-				case "agent.get":
-					command = 'genesys.wwe.service.agent.get(succeeded, failed)';
-					commandHelp = "Get the agent attributes.";
+	});	
+
+	function waitForSCAPI() {
+		genesys.wwe.service.sendMessage({ 
+			request: "system.getAllowedServices", 
+			parameters: [] }, 
+			function(response){  //success
+				console.log("Available Services: " + JSON.stringify(response));
+				clearInterval(intervalId);
+				subscribe();
+			},
+			function(response){  //failure
+				alert("Failed to retrieve available services");
+			}
+		);
+	}
+	
+	var eventHandler = {
+		eventReceived: function(evt)
+		{
+			$("#eventdata").val(JSON.stringify(evt));
+			
+			try {
+				$("#event").val(evt.event);
+				$("#eventType").val(evt.data.eventType);
+			} catch(e) {
+			}
+			
+			switch(evt.event) {
+				case 'agent':
+					refreshAgentInfo();
 					break;
-				case "agent.getStateList":
-					command = 'genesys.wwe.service.agent.getStateList(succeeded, failed)';
-					commandHelp = "Get the list of possible states of the agent.";
+					
+				case 'media':
+					getMediaList();
 					break;
-				case "agent.setState":
-					command = 'genesys.wwe.service.agent.setState("NotReady", succeeded, failed)';
-					commandHelp = "Set the agent state.";
+
+				case 'interaction':
+					//handleInteractionEvent(evt);
 					break;
-				case "agent.getState":
-					command = 'genesys.wwe.service.agent.getState(succeeded, failed)';
-					commandHelp = "Get the agent state.";
-					break;
-				case "interaction.getInteractions":
-					command = 'genesys.wwe.service.interaction.getInteractions(succeeded, failed)';
-					commandHelp = "Get all the interactions.";
-					break;
-				case "interaction.getByInteractionId":
-					command = 'genesys.wwe.service.interaction.getByInteractionId("1", succeeded, failed)';
-					commandHelp = "Get an interaction by its interaction identifier.";
-					break;
-				case "interaction.setUserData":
-					command =
-						'genesys.wwe.service.interaction.setUserData("1", { KEY1: "MyValue111", KEY2: "MyValue222" }, succeeded, failed)';
-					commandHelp = "Set the user data to the live interaction.";
-					break;
-				case "interaction.deleteUserData":
-					command = 'genesys.wwe.service.interaction.deleteUserData("1", "KEY1", succeeded, failed)';
-					commandHelp = "Deletes the user data attached to the interaction.";
-					break;
-				case "interaction.selectCaseByCaseId":
-					command =
-						'genesys.wwe.service.interaction.selectCaseByCaseId("********-****-****-****-************", succeeded, failed)';
-					commandHelp = "Select the case in the UI by case identifier.";
-					break;
-				case "voice.dial":
-					command =
-						'genesys.wwe.service.voice.dial("*PhoneNumber*", { myAttachedDataKey1: "myAttachedDataValue1", myAttachedDataKey2: "myAttachedDataValue2" }, succeeded, failed)';
-					commandHelp = "Call the destination with the optional attached data.";
-					break;
-				case "voice.startCallRecording":
-					command = 'genesys.wwe.service.voice.startCallRecording("1", succeeded, failed)';
-					commandHelp = "Start the call recording.";
-					break;
-				case "voice.stopCallRecording":
-					command = 'genesys.wwe.service.voice.stopCallRecording("1", succeeded, failed)';
-					commandHelp = "Stop the call recording.";
-					break;
-				case "voice.pauseCallRecording":
-					command = 'genesys.wwe.service.voice.pauseCallRecording("1", succeeded, failed)';
-					commandHelp = "Pause the call recording.";
-					break;
-				case "voice.resumeCallRecording":
-					command = 'genesys.wwe.service.voice.resumeCallRecording("1", succeeded, failed)';
-					commandHelp = "Resume the call recording.";
-					break;
-				case "email.create":
-					command = 'genesys.wwe.service.email.create("omaha@gmail.com", succeeded, failed)';
-					commandHelp = "Create a new empty email.";
-					break;
-				case "media.getMediaList":
-					command = 'genesys.wwe.service.media.getMediaList(succeeded, failed)';
-					commandHelp = "Get the media attributes.";
-					break;
-				case "media.getMediaByName":
-					command = 'genesys.wwe.service.media.getMediaByName("voice", succeeded, failed)';
-					commandHelp = "Get a media by its name.";
-					break;
-				case "media.setState":
-					command = 'genesys.wwe.service.media.setState("voice", "NotReady", succeeded, failed)';
-					commandHelp = "Set the media state.";
-					break;
-				case "system.triggerActivity":
-					command = 'genesys.wwe.service.system.triggerActivity(succeeded, failed)';
-					commandHelp = "Trigger an activity.";
-					break;
-				case "system.getAllowedServices":
-					command = 'genesys.wwe.service.system.getAllowedServices(succeeded, failed)';
-					commandHelp = "Following the security configuration, this service retrieves the list of allowed services.";
-					break;
-				case "system.popupToast":
-					command =
-						'genesys.wwe.service.system.popupToast({\n\
-	title: "The title",\n\
-	iconUrl: "https://cdn3.iconfinder.com/data/icons/rssicons/PNG/001.png",\n\
-	subject: "The great subject",\n\
-	message: "The long enough message,\\r\\nwith several lines\\nbut not that much.",\n\
-	keyValues: {\n\
-		"key1": "value one",\n\
-		"key2": "value two",\n\
-		"key3": "value three"\n\
-	},\n\
-	//buttons: [ "Show", "Dismiss" ]\n\
-	buttonShowDismiss: true,\n\
-	autoCloseTimeout: 20000,\n\
-	sendToMyMessage: true\n\
-}, succeeded, failed)';
-					commandHelp = "Popup a customizable toast.";
-					break;
-				case "system.updateToast":
-					command =
-						'genesys.wwe.service.system.updateToast("wweCustomToast0", {\n\
-	title: "The title",\n\
-	iconUrl: "https://cdn3.iconfinder.com/data/icons/rssicons/PNG/001.png",\n\
-	subject: "The great subject",\n\
-	message: "The long enough message,\\r\\nwith several lines\\nbut not that much.",\n\
-	keyValues: {\n\
-		"key1": "1111111111111111",\n\
-		"key3": "3333333333333"\n\
-	},\n\
-	buttons: [ "AAAAA", "BBBBB", "CCCCC" ]\n\
-	//buttonShowDismiss: true\n\
-}, succeeded, failed)';
-					commandHelp = "Popup a customizable toast.";
-					break;
-				case "system.closeToast":
-					command = 'genesys.wwe.service.system.closeToast("wweCustomToast0", succeeded, failed)';
-					commandHelp = "Close a customizable toast.";
+					
+				case 'system':
+					//handleSystemEvent(evt);
 					break;
 			}
-			document.getElementById("command").value = command;
-			commandHelp +=
-				" The 'succeeded' and 'failed' arguments are the callback functions called asynchronously to send the result.";
-			document.getElementById("commandHelp").innerText = commandHelp;
 		}
-
-		function eventHandler(message) {
-			switch (message.event) {
-				case "agent":
-					log("Received agent event: " + JSON.stringify(message, null, "\t"));
-					break;
-				case "interaction":
-					log("Received interaction event: " + JSON.stringify(message, null, "\t"));
-					break;
-				case "media":
-					log("Received media event: " + JSON.stringify(message, null, "\t"));
-					break;
-				case "system":
-					log("Received system event: " + JSON.stringify(message, null, "\t"));
-					break;
-
-				default:
+	};
+	
+	function subscribe() {
+		genesys.wwe.service.subscribe(
+			[ "agent", "interaction", "media", "system" ], 
+			eventHandler.eventReceived, 
+			eventHandler
+		);
+	}
+	
+	function unsubscribe() {
+		genesys.wwe.service.unsubscribe(
+			eventHandler
+		);
+	}
+		
+	function refreshAgentInfo() {
+		getAgent();
+		getStateList();
+		getMediaList();
+	}
+			
+	function buildStateDropdown(mediaName) {
+		var btnLabel = ((mediaName === undefined) ? 'Agent State' : (mediaName + ' State'));
+		
+		var btnDef = '<div class="dropdown">' +
+					 '<button class="btn btn-default btn-sm" type="button" data-toggle="dropdown">' +
+					 btnLabel +
+					 '<span class="caret"></span>' +
+					 '</button>' +
+					 '<ul class="dropdown-menu">';
+					
+		for(var i = 0; i < stateList.length; i++) {
+			var s = stateList[i];
+			if ( mediaName === undefined ) {
+				btnDef += '<li><a href="#" onclick="setAgentState(\'' + s.operationName + '\')">' + s.displayName + '</a></li>'
+			} else {
+				btnDef += '<li><a href="#" onclick="setMediaState(\'' + mediaName + '\', \'' + s.operationName + '\')">' + s.displayName + '</a></li>'
 			}
-		}
-
-		// Called when the current web page is loaded.
-		function initializeWebPage() {
-
-			// Subscribe to Workspace Web Edition
-			genesys.wwe.service.subscribe(["agent", "interaction", "media", "system"], eventHandler, this);
-		}
-	</script>
+		}				  			
+					 
+		btnDef +=    '</ul>' +
+					 '</div>';
+					 
+		return btnDef;
+	}	
+	
+  </script>
 </head>
 
-<body onload="initializeWebPage()">
-	<br/>
-	<button onclick="showCommand('agent.get')">agent.get</button>
-	<button onclick="showCommand('agent.getStateList')">agent.getStateList</button>
-	<button onclick="showCommand('agent.setState')">agent.setState</button>
-	<button onclick="showCommand('agent.getState')">agent.getState</button>
-	<br/>
-	<button onclick="showCommand('media.getMediaList')">media.getMediaList</button>
-	<button onclick="showCommand('media.getMediaByName')">media.getMediaByName</button>
-	<button onclick="showCommand('media.setState')">media.setState</button>
-	<br/>
-	<button onclick="showCommand('interaction.getInteractions')">interaction.getInteractions</button>
-	<button onclick="showCommand('interaction.getByInteractionId')">interaction.getByInteractionId</button>
-	<button onclick="showCommand('interaction.setUserData')">interaction.setUserData</button>
-	<button onclick="showCommand('interaction.deleteUserData')">interaction.deleteUserData</button>
-	<button onclick="showCommand('interaction.selectCaseByCaseId')">interaction.selectCaseByCaseId</button>
-	<br/>
-	<button onclick="showCommand('voice.dial')">voice.dial</button>
-	<button onclick="showCommand('voice.startCallRecording')">voice.startCallRecording</button>
-	<button onclick="showCommand('voice.stopCallRecording')">voice.stopCallRecording</button>
-	<button onclick="showCommand('voice.pauseCallRecording')">voice.pauseCallRecording</button>
-	<button onclick="showCommand('voice.resumeCallRecording')">voice.resumeCallRecording</button>
-	<br/>
-	<button onclick="showCommand('email.create')">email.create</button>
-	<br/>
-	<button onclick="showCommand('system.triggerActivity')">system.triggerActivity</button>
-	<button onclick="showCommand('system.getAllowedServices')">system.getAllowedServices</button>
-	<button onclick="showCommand('system.popupToast')">system.popupToast</button>
-	<button onclick="showCommand('system.updateToast')">system.updateToast</button>
-	<button onclick="showCommand('system.closeToast')">system.closeToast</button>
-	<br/>
-	<textarea id="command" style="height: 50px; width: 600px;"></textarea>
-	<br/>
-	<div id="commandHelp"></div>
-	<br/>
-	<button onclick="executeCommand()">Execute</button>
-	<button onclick="document.getElementById('output').innerHTML = ''">Clear</button>
-	<br/>
-	<div id="output"></div>
+<body>
+	<div class="container-fluid">
+
+		<div class="row">
+			<div class="col-sm-6">
+				<h1>Genesys WWE Embedded Sample</h1>
+				<p>The sample shown here is meant to illustrate how the Genesys WWE Service Client API can be utilized to provide
+					call control inside of a web-based CRM.
+					The page you are currently viewing is meant to represent the CRM. The buttons below offer some examples of some of
+					the Genesys functionality you might use in the CRM.
+					Please review the source code of these pages for detailed notes regarding the WWE Service Client API.</p>
+				<p>In this example WWE is embedded in an iFrame and will be displayed in floating dialog. To get started, click on
+					the "Show WWE" button.</p>
+
+				<!-- <button id="show-wwe" style="width:100%;">Show WWE</button><br><br><br> -->
+			</div>
+			<div class="col-sm-6">
+			</div>
+		</div>
+
+		<div class="row">
+			<div class="col-sm-6">
+				<div class="panel panel-primary">
+					<div class="panel-heading">Agent Info New New<button class="btn btn-xs btn-default pull-right" type="button"
+						 onclick="refreshAgentInfo()">Refresh</button></div>
+					<div class="panel-body">
+						<form class="form-horizontal">
+							<div class="form-group">
+								<div class="col-sm-12">
+									<div class="pull-right" id="agentState">
+									</div>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="agentUsername" class="col-sm-3 control-label">Username</label>
+								<div class="col-sm-9">
+									<input type="text" id="agentUsername" class="form-control" placeholder="Username" readonly></input>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="agentFirstname" class="col-sm-3 control-label">Firstname</label>
+								<div class="col-sm-9">
+									<input type="text" id="agentFirstname" class="form-control" placeholder="Firstname" readonly></input>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="agentLastname" class="col-sm-3 control-label">Lastname</label>
+								<div class="col-sm-9">
+									<input type="text" id="agentLastname" class="form-control" placeholder="Lastname" readonly></input>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="agentEmployeeId" class="col-sm-3 control-label">EmployeeId</label>
+								<div class="col-sm-9">
+									<input type="text" id="agentEmployeeId" class="form-control" placeholder="Employee ID" readonly></input>
+								</div>
+							</div>
+
+							<table class="table table-striped table-condensed">
+								<caption>
+									<h4 class="text-center">Media</h4>
+								</caption>
+								<thead>
+									<tr>
+										<th>Type</th>
+										<th>State</th>
+										<th>Operations</th>
+									</tr>
+								</thead>
+								<tbody id="mediaTableBody">
+								</tbody>
+							</table>
+
+						</form>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="row">
+			<div class="col-sm-6">
+				<div class="panel panel-primary">
+					<div class="panel-heading">Click-to-Dial</div>
+					<div class="panel-body">
+						<form>
+							<div class="form-group">
+								<input type="text" class="form-control" id="phone" placeholder="Phone">
+							</div>
+							<div class="form-group">
+								<label for="dialuserdata">Userdata</label>
+								<textarea id="dialuserdata" class="form-control" rows="5" placeholder="{key:'value'}"></textarea>
+							</div>
+							<button class="btn btn-primary" type="button" onclick="dial()">Dial</button>
+						</form>
+					</div>
+				</div>
+			</div>
+			<div class="col-sm-6">
+			</div>
+		</div>
+
+		<div class="row">
+			<div class="col-sm-6">
+				<div class="panel panel-primary">
+					<div class="panel-heading">Events</div>
+					<div class="panel-body">
+						<form>
+							<div class="form-group">
+								<button type="button" class="btn btn-success" onclick="subscribe()">Subscribe</button>
+								<button type="button" class="btn btn-danger" onclick="unsubscribe()">Unsubscribe</button>
+							</div>
+							<div class="form-group">
+								<label for="event" class="col-sm-3 control-label">Event</label>
+								<div class="col-sm-9">
+									<input type="text" id="event" class="form-control" placeholder="Event" readonly></input>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="eventType" class="col-sm-3 control-label">EventType</label>
+								<div class="col-sm-9">
+									<input type="text" id="eventType" class="form-control" placeholder="EventType" readonly></input>
+								</div>
+							</div>
+							<div class="form-group">
+								<label for="eventdata">Interaction Data</label>
+								<textarea id="eventdata" class="form-control" rows="7" placeholder="No events received" readonly></textarea>
+							</div>
+						</form>
+					</div>
+				</div>
+			</div>
+			<div class="col-sm-6">
+			</div>
+		</div>
+
+		<div class="row">
+			<div class="col-sm-6">
+				<div class="panel panel-primary">
+					<div class="panel-heading">Interactions <button class="btn btn-xs btn-default pull-right" type="button" onclick="getInteractions()">Refresh</button></div>
+					<div class="panel-body">
+						<form>
+							<div class="form-group">
+								<select id="interactions" class="form-control" onchange="getInteractionById()"></select>
+							</div>
+							<div class="form-group">
+								<label for="interactiondata">Interaction Data</label>
+								<textarea id="interactiondata" class="form-control" rows="5" placeholder="No interaction selected" readonly></textarea>
+							</div>
+						</form>
+						<div class="row">
+							<div class="col-sm-2">
+								<div class="panel panel-default">
+									<div class="panel-heading">Recording</div>
+									<div class="panel-body">
+										<button type="button" class="btn btn-default btn-block" onclick="setCallRecordingState('voice.startCallRecording')"><span
+											 class="glyphicon glyphicon-play"></span> Start</button>
+										<button type="button" class="btn btn-default btn-block" onclick="setCallRecordingState('voice.pauseCallRecording')"><span
+											 class="glyphicon glyphicon-pause"></span> Pause</button>
+										<button type="button" class="btn btn-default btn-block" onclick="setCallRecordingState('voice.resumeCallRecording')"><span
+											 class="glyphicon glyphicon-step-forward"></span> Resume</button>
+										<button type="button" class="btn btn-default btn-block" onclick="setCallRecordingState('voice.stopCallRecording')"><span
+											 class="glyphicon glyphicon-stop"></span> Stop</button>
+									</div>
+								</div>
+							</div>
+							<div class="col-sm-10">
+								<div class="panel panel-default">
+									<div class="panel-heading">Attached Data</div>
+									<div class="panel-body">
+										<form>
+											<div class="form-group input-group">
+												<input type="text" class="form-control" id="key" placeholder="Key">
+												<span class="input-group-btn">
+													<button class="btn btn-danger" type="button" onclick="deleteUserData()">Delete</button>
+												</span>
+											</div>
+											<div class="form-group">
+												<label for="userdata">Userdata</label>
+												<textarea id="userdata" class="form-control" rows="5" placeholder="{key:'value'}"></textarea>
+											</div>
+											<button type="button" class="btn btn-success" onclick="setUserData()">Set</button>
+										</form>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="col-sm-6">
+			</div>
+		</div>
+
+	</div>
+
+	<!-- This is the dialog and iframe that will host WWE -->
+	<!-- <div id="dialog-wwe" title="WWE Service Client API - Embedded UI">
+	<iframe id="wweFrame" width="100%" height="100%" src="https://bcbsnc-wwe-use1-pvt.genesyscloud.com/ui/ad/v1/index.html";>
+	</iframe>
+</div> -->
+
 </body>
 
 </html>
